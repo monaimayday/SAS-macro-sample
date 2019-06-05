@@ -9,6 +9,7 @@ options nonotes;
 %let b4=-0.073 ;
 %let b5=-0.287 ;
 %let b=-0.287 ;
+/* defined based on historical data*/
 %let accrue=15.11;
 %let foltime=12;
 
