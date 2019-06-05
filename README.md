@@ -1,5 +1,4 @@
 # SAS-macro-sample
-SAS macro sample
 Author: Xue Jia
 
 # Introduction
