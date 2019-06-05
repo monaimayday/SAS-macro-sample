@@ -1,0 +1,187 @@
+%macro cox(N=); /* N=number of simulation*/
+ods exclude all;
+ods noresults;
+options nonotes;
+%let b0=-2.1 ;
+%let b1=0.63 ;
+%let b2=-0.518 ;
+%let b3=-0.385 ;
+%let b4=-0.073 ;
+%let b5=-0.287 ;
+%let b=-0.287 ;
+%let accrue=15.11;
+%let foltime=12;
+
+data HRsum HRsum_;run;
+
+/* Generate randomization scheme with block size=4 and arm=0,1*/
+%do i=1 %to &N;
+proc plan seed=&i;
+	factors region=150  ordered bsize=4 ordered;
+	treatments arms=4;
+	output out=ran arms nvals=(1 1 2 2) random;
+	ods output'plan'=plan; 
+run;
+quit;
+
+/* generate a simulation dataset based on bernoulli distribution with percentage of each baseline characteriscs*/
+data a;
+	call streaminit(&i+100);
+	do i=1 to 454;
+		ECOG=RAND('BERNOULLI', 0.755);
+		EGFR=RAND('BERNOULLI', 0.375);*60%;
+		TTRAN=RAND('BERNOULLI', 0.583);
+		LOCAT=RAND('BERNOULLI', 0.376); 
+		DURATION=RAND('BERNOULLI', 0.65);
+		output;
+	end;
+run;
+
+proc sql noprint;
+	create table count as
+	select ecog, egfr, ttran, locat, duration,count(*) as count
+	from a
+	group by ecog, egfr, ttran, locat, duration;
+quit;
+
+proc sql noprint;
+	create table count_ as
+	select ecog, egfr, ttran, locat, count(*) as count
+	from a
+	group by ecog, egfr, ttran, locat;
+quit;
+
+/*add j=1 for each population*/
+
+data b;
+	set count;
+	i=1;j=1;
+	do while(i<=ceil(count/4)*4);28
+		if i>count then j=0;27
+		i+1;
+		output;
+	end;
+run;
+
+data b_;
+	set count_;
+	i=1;j=1;
+	do while(i<=ceil(count/4)*4);
+		if i>count then j=0;
+		i+1;
+		output;
+	end;
+run;
+
+/* Assigned the study samples with arms*/
+data b;
+	merge b ran(keep=arms);
+	if j=1;
+	arms=arms-1;
+run;
+
+data b_;
+	merge b_ ran(keep=arms);
+	if j=1;
+	arms=arms-1;
+run;
+
+/*get hazard and survival time for each patient*/
+data ph;
+	set b;
+	call streaminit(&i+1111111);
+	lamda=exp(&b0+&b1*ecog+&b2*egfr+&b3*ttran+&b4*locat+&b5*duration+&b*arms);
+
+	tEvent=rand('exponential')/lamda;
+
+/*define censor*/
+	call streaminit(&i+222222);
+	fol=rand('uniform')*&accrue+&foltime;
+	if tevent>fol then do; tevent=fol; censor=1;end;else censor=0;
+run;
+data ph_;
+	set b_;
+	call streaminit(&i+1000000);
+	duration=RAND('BERNOULLI', 0.65);
+	lamda=exp(&b0+&b1*ecog+&b2*egfr+&b3*ttran+&b4*locat+&b5*duration+&b*arms);
+	call streaminit(&i+1111111);
+	tEvent=rand('exponential')/lamda;
+	call streaminit(&i+222222);
+	fol=rand('uniform')*&accrue+&foltime;
+	if tevent>fol then do; tevent=fol; censor=1;end;else censor=0;
+run;
+
+/*performs Cox proportional hazards model*/
+ 
+proc phreg data=PH;
+model tevent * censor(1) = ecog egfr ttran locat duration arms;
+ods output ParameterEstimates=HR;
+run;
+proc sql;
+	select median(tevent) into:cmos
+	from ph
+	where arms=0;
+quit;
+proc sql;
+	select median(tevent) into:Tmos
+	from ph
+	where arms=1;
+quit;
+
+data HR1;
+	set HR;
+	keep ChiSq ProbChiSq HazardRatio p cmos tmos;
+	if ProbChiSq<0.025 then p=1;else p=0;
+	Cmos=&cmos;
+	Tmos=&tmos;
+	where Parameter='arms';
+run;
+data HRsum;
+	set HRsum HR1;
+run;
+
+proc phreg data=PH_;
+model tevent * censor(1) = ecog egfr ttran locat duration arms;
+ods output ParameterEstimates=HR_;
+run;
+proc sql;
+	select median(tevent) into:cmos
+	from ph_
+	where arms=0;
+quit;
+proc sql;
+	select median(tevent) into:Tmos
+	from ph_
+	where arms=1;
+quit;
+
+data HR1_;
+	set HR_;
+	keep ChiSq ProbChiSq HazardRatio p cmos tmos;
+	if ProbChiSq<0.025 then p=1;else p=0;
+	Cmos=&cmos;
+	Tmos=&tmos;
+	where Parameter='arms';
+run;
+data HRsum_;
+	set HRsum_ HR1_;
+run;
+%end;
+
+/*calculate power*/
+ods select all; ods results; options notes;
+proc sql;
+	select sum(p) as sum, count(*) as count,sum(p)/count(*) as power, mean(cmos) as cmos, mean(tmos) as tmos
+	from HRsum
+	where p ne .;
+quit;
+
+proc sql;
+	select sum(p) as sum, count(*) as count,sum(p)/count(*) as power, mean(cmos) as cmos, mean(tmos) as tmos
+	from HRsum_
+	where p ne .;
+quit;
+%mend;
+
+
+%cox(N=1);
